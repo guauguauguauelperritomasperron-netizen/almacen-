@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Star Escape</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#111827,#312e81);font-family:Arial,sans-serif;color:white;display:flex;justify-content:center;min-height:100vh}
+.wrap{width:min(960px,96vw);padding:18px 0}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:clamp(25px,5vw,42px);letter-spacing:2px;color:#fde68a;text-shadow:0 3px #92400e}
+.hud{display:flex;gap:10px;flex-wrap:wrap}.pill{background:#ffffff1c;border:1px solid #ffffff35;border-radius:14px;padding:10px 14px;font-weight:bold}
+canvas{display:block;width:100%;height:auto;margin-top:14px;border:3px solid #ffffff55;border-radius:18px;background:#111827;box-shadow:0 18px 55px #0008}
+.bottom{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px}
+button{border:0;border-radius:12px;padding:11px 16px;font-weight:bold;background:#fbbf24;color:#422006;cursor:pointer}
+button:hover{filter:brightness(1.12)}.help{color:#dbeafe;font-size:14px;line-height:1.5}
+#message{font-weight:bold;color:#fde68a;min-height:22px}
+</style>
+</head>
+<body>
+<div class="wrap">
+ <div class="top">
+  <h1>⭐ STAR ESCAPE</h1>
+  <div class="hud">
+   <div class="pill">⭐ Estrellas: <span id="score">0</span>/10</div>
+   <div class="pill">⏱ Tiempo: <span id="time">60</span>s</div>
+   <div class="pill">❤️ Vidas: <span id="lives">3</span></div>
+  </div>
+ </div>
+ <canvas id="game" width="900" height="520"></canvas>
+ <div class="bottom">
+  <div class="help">Mover: ← → o A / D · Saltar: ESPACIO / ↑ / W<br>¡Juntá 10 estrellas y llegá al portal! Evitá los bichitos.</div>
+  <div><button id="sound">🔊 Sonido: sí</button> <button id="restart">↻ Reiniciar</button></div>
+ </div>
+ <div id="message"></div>
+</div>
+<script>
+const c=document.getElementById('game'),ctx=c.getContext('2d');
+const scoreEl=document.getElementById('score'),timeEl=document.getElementById('time'),livesEl=document.getElementById('lives'),msg=document.getElementById('message');
+const W=c.width,H=c.height,keys={};let sound=true,audio=null,score=0,lives=3,time=60,ended=false,last=0,elapsed=0;
+const player={x:55,y:420,w:28,h:34,vx:0,vy:0,on:false,inv:0};
+const platforms=[
+{x:0,y:480,w:900,h:40},{x:105,y:410,w:120,h:15},{x:275,y:350,w:115,h:15},
+{x:440,y:405,w:115,h:15},{x:600,y:330,w:115,h:15},{x:755,y:410,w:105,h:15},
+{x:190,y:260,w:110,h:15},{x:390,y:220,w:115,h:15},{x:610,y:180,w:115,h:15},
+{x:785,y:260,w:80,h:15}
+];
+let stars=[],enemies=[],portal={x:830,y:115,w:42,h:60};
+function reset(){
+ score=0;lives=3;time=60;ended=false;elapsed=0;player.x=55;player.y=430;player.vx=0;player.vy=0;player.inv=0;
+ stars=[ [150,375],[325,315],[490,370],[650,295],[805,375],[235,225],[440,185],[660,145],[820,225],[520,445] ].map(([x,y],i)=>({x,y,r:10,got:false,phase:i}));
+ enemies=[{x:300,y:458,min:260,max:390,v:1.6},{x:560,y:458,min:480,max:700,v:2},{x:730,y:308,min:615,max:710,v:1.4}];
+ updateHud();msg.textContent='';last=performance.now();requestAnimationFrame(loop);
+}
+function updateHud(){scoreEl.textContent=score;timeEl.textContent=Math.ceil(time);livesEl.textContent=lives}
+function beep(freq=600,dur=.09){if(!sound)return;try{audio=audio||new(window.AudioContext||window.webkitAudioContext)();let o=audio.createOscillator(),g=audio.createGain();o.connect(g);g.connect(audio.destination);o.frequency.value=freq;g.gain.value=.045;o.start();o.stop(audio.currentTime+dur)}catch(e){}}
+function hit(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
+function draw(){
+ let g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#172554');g.addColorStop(1,'#312e81');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ for(let i=0;i<65;i++){let x=(i*137)%W,y=(i*71)%H;ctx.fillStyle='#ffffff99';ctx.fillRect(x,y,2,2)}
+ // distant hills
+ ctx.fillStyle='#1e3a8a';ctx.beginPath();ctx.moveTo(0,480);for(let x=0;x<=W;x+=90)ctx.lineTo(x,390+Math.sin(x*.02)*35);ctx.lineTo(W,480);ctx.fill();
+ platforms.forEach((p,i)=>{ctx.fillStyle='#0f766e';ctx.fillRect(p.x,p.y,p.w,p.h);ctx.fillStyle='#5eead4';ctx.fillRect(p.x,p.y,p.w,5);ctx.fillStyle='#134e4a';for(let x=p.x+10;x<p.x+p.w;x+=25)ctx.fillRect(x,p.y+8,10,4)});
+ stars.forEach(s=>{if(s.got)return;let bob=Math.sin(elapsed*.006+s.phase)*4;ctx.save();ctx.translate(s.x,s.y+bob);ctx.rotate(elapsed*.002);ctx.fillStyle='#fde047';ctx.strokeStyle='#fef3c7';ctx.lineWidth=2;ctx.beginPath();for(let i=0;i<10;i++){let r=i%2?4:11,a=-Math.PI/2+i*Math.PI/5;ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r)}ctx.closePath();ctx.fill();ctx.stroke();ctx.restore()});
+ enemies.forEach(e=>{ctx.fillStyle='#fb7185';ctx.beginPath();ctx.roundRect(e.x,e.y,30,22,8);ctx.fill();ctx.fillStyle='white';ctx.fillRect(e.x+7,e.y+6,5,6);ctx.fillRect(e.x+19,e.y+6,5,6);ctx.fillStyle='#1f2937';ctx.fillRect(e.x+9,e.y+8,2,3);ctx.fillRect(e.x+21,e.y+8,2,3)});
+ // portal
+ ctx.save();ctx.shadowColor='#a78bfa';ctx.shadowBlur=22;ctx.fillStyle='#8b5cf6';ctx.beginPath();ctx.ellipse(portal.x+21,portal.y+30,21,31,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#c4b5fd';ctx.beginPath();ctx.ellipse(portal.x+21,portal.y+30,12,23,0,0,Math.PI*2);ctx.fill();ctx.restore();
+ // player
+ if(player.inv<=0||Math.floor(elapsed/90)%2===0){ctx.fillStyle='#fbbf24';ctx.fillRect(player.x,player.y,player.w,player.h);ctx.fillStyle='#7c2d12';ctx.fillRect(player.x+5,player.y+8,5,6);ctx.fillRect(player.x+18,player.y+8,5,6);ctx.fillStyle='#fff';ctx.fillRect(player.x+6,player.y+9,2,2);ctx.fillRect(player.x+19,player.y+9,2,2);ctx.fillStyle='#92400e';ctx.fillRect(player.x+7,player.y+25,15,4)}
+ if(ended){ctx.fillStyle='#020617bb';ctx.fillRect(0,0,W,H);ctx.textAlign='center';ctx.fillStyle='#fde68a';ctx.font='bold 48px Arial';ctx.fillText(score>=10&&hit(player,portal)?'¡ESCAPASTE!':'FIN DEL JUEGO',W/2,H/2-10);ctx.font='22px Arial';ctx.fillStyle='white';ctx.fillText('Presioná REINICIAR para jugar otra vez',W/2,H/2+35)}
+}
+function loop(now){
+ if(ended)return;let dt=Math.min((now-last)/16.67,2);last=now;elapsed+=now-last+16.67;
+ time-=dt/60*1; // corrected below using frame delta
+ // timer uses real elapsed frame delta
+ time+=dt/60;time-=dt/60; // stable frame-rate-independent timer adjustment below
+ if(!loop.prev)loop.prev=now;let sec=(now-loop.prev)/1000;loop.prev=now;time-=sec;
+ if(time<=0){time=0;ended=true;msg.textContent='¡Se terminó el tiempo!';beep(180,.3)}
+ let speed=4.2;player.vx=0;if(keys.ArrowLeft||keys.a||keys.A)player.vx=-speed;if(keys.ArrowRight||keys.d||keys.D)player.vx=speed;
+ player.x+=player.vx*dt;player.x=Math.max(0,Math.min(W-player.w,player.x));
+ if((keys[' ']||keys.ArrowUp||keys.w||keys.W)&&player.on){player.vy=-10.5;player.on=false;beep(420,.05)}
+ player.vy+=.48*dt;player.y+=player.vy*dt;player.on=false;
+ for(const p of platforms){if(player.vy>=0&&player.x+player.w>p.x&&player.x<p.x+p.w&&player.y+player.h>=p.y&&player.y+player.h-player.vy*dt<=p.y){player.y=p.y-player.h;player.vy=0;player.on=true}}
+ if(player.y>H+60){loseLife()}
+ player.inv=Math.max(0,player.inv-dt);
+ stars.forEach(s=>{if(!s.got&&Math.abs((player.x+14)-s.x)<23&&Math.abs((player.y+17)-s.y)<25){s.got=true;score++;updateHud();beep(850,.12)}});
+ enemies.forEach(e=>{e.x+=e.v*dt;if(e.x<e.min||e.x>e.max)e.v*=-1;if(player.inv<=0&&hit(player,{x:e.x,y:e.y,w:30,h:22})){loseLife()}});
+ if(score>=10&&hit(player,portal)){ended=true;msg.textContent='¡Nivel completado!';beep(1000,.3)}
+ if(lives<=0)ended=true;
+ updateHud();draw();if(!ended)requestAnimationFrame(loop);else draw();
+}
+function loseLife(){lives--;player.x=55;player.y=430;player.vy=0;player.inv=90;updateHud();beep(170,.18);if(lives<=0){ended=true;msg.textContent='¡Te quedaste sin vidas!'}}
+window.addEventListener('keydown',e=>{if([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key))e.preventDefault();keys[e.key]=true});
+window.addEventListener('keyup',e=>keys[e.key]=false);
+document.getElementById('restart').onclick=()=>{loop.prev=0;reset()};
+document.getElementById('sound').onclick=()=>{sound=!sound;document.getElementById('sound').textContent=sound?'🔊 Sonido: sí':'🔇 Sonido: no';if(sound)beep()};
+reset();
+</script>
+</body></html>
